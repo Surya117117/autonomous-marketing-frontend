@@ -1,0 +1,1275 @@
+
+
+============================================================
+FILE: lib\api\client.ts
+============================================================
+import {
+  getAuthorizationHeader,
+} from "@/lib/auth";
+
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
+
+export class ApiError extends Error {
+  status: number;
+  detail: string;
+
+  constructor(
+    status: number,
+    detail: string,
+  ) {
+    super(detail);
+
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+async function parseApiResponse(
+  response: Response,
+): Promise<unknown> {
+  const contentType =
+    response.headers.get("content-type") || "";
+
+  if (
+    contentType.includes(
+      "application/json",
+    )
+  ) {
+    return response.json();
+  }
+
+  return response.text();
+}
+
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const authorization =
+    getAuthorizationHeader();
+
+  const headers = new Headers(
+    options.headers,
+  );
+
+  if (!headers.has("Content-Type")) {
+    headers.set(
+      "Content-Type",
+      "application/json",
+    );
+  }
+
+  if (authorization) {
+    headers.set(
+      "Authorization",
+      authorization,
+    );
+  }
+
+  const response = await fetch(
+    `${API_URL}${path}`,
+    {
+      ...options,
+      headers,
+    },
+  );
+
+  const data =
+    await parseApiResponse(response);
+
+  if (!response.ok) {
+    let detail =
+      "An unexpected error occurred.";
+
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "detail" in data
+    ) {
+      const value = (
+        data as {
+          detail?: unknown;
+        }
+      ).detail;
+
+      if (typeof value === "string") {
+        detail = value;
+      } else if (Array.isArray(value)) {
+        detail = value
+          .map((item) => {
+            if (
+              typeof item === "object" &&
+              item !== null &&
+              "msg" in item
+            ) {
+              return String(
+                (
+                  item as {
+                    msg?: unknown;
+                  }
+                ).msg ?? "Validation error",
+              );
+            }
+
+            return String(item);
+          })
+          .join(", ");
+      }
+    } else if (
+      typeof data === "string" &&
+      data.trim()
+    ) {
+      detail = data;
+    }
+
+    throw new ApiError(
+      response.status,
+      detail,
+    );
+  }
+
+  return data as T;
+}
+
+
+============================================================
+FILE: lib\auth.ts
+============================================================
+const ACCESS_TOKEN_KEY =
+  "marketing_system_access_token";
+
+const TOKEN_TYPE_KEY =
+  "marketing_system_token_type";
+
+export function saveAuthToken(
+  accessToken: string,
+  tokenType: string = "bearer",
+): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  localStorage.setItem(
+    ACCESS_TOKEN_KEY,
+    accessToken,
+  );
+
+  localStorage.setItem(
+    TOKEN_TYPE_KEY,
+    tokenType,
+  );
+}
+
+export function getAuthToken(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return localStorage.getItem(
+    ACCESS_TOKEN_KEY,
+  );
+}
+
+export function getTokenType(): string {
+  if (typeof window === "undefined") {
+    return "bearer";
+  }
+
+  return (
+    localStorage.getItem(
+      TOKEN_TYPE_KEY,
+    ) || "bearer"
+  );
+}
+
+export function getAuthorizationHeader(): string | null {
+  const token = getAuthToken();
+
+  if (!token) {
+    return null;
+  }
+
+  return `${getTokenType()} ${token}`;
+}
+
+export function clearAuth(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  localStorage.removeItem(
+    ACCESS_TOKEN_KEY,
+  );
+
+  localStorage.removeItem(
+    TOKEN_TYPE_KEY,
+  );
+}
+
+export function isAuthenticated(): boolean {
+  return Boolean(getAuthToken());
+}
+
+
+============================================================
+FILE: components\onboarding\onboarding-form.tsx
+============================================================
+"use client";
+
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Globe,
+  Target,
+  Upload,
+  Users,
+  Zap,
+  RotateCcw,
+  Sparkles,
+} from "lucide-react";
+import { useState } from "react";
+import Link from "next/link";
+
+import type { OnboardingData } from "@/types/onboarding";
+
+const steps = [
+  {
+    number: 1,
+    title: "Your business",
+    description: "Tell us about your business.",
+    icon: Globe,
+  },
+  {
+    number: 2,
+    title: "Your audience",
+    description: "Who are you trying to reach?",
+    icon: Users,
+  },
+  {
+    number: 3,
+    title: "Your goals",
+    description: "What do you want your marketing to achieve?",
+    icon: Target,
+  },
+  {
+    number: 4,
+    title: "Your brand",
+    description: "Give the AI the information it needs.",
+    icon: Zap,
+  },
+];
+
+const goalOptions = [
+  "Increase sales",
+  "Generate leads",
+  "Build brand awareness",
+  "Grow social media",
+  "Drive website traffic",
+  "Launch a new product",
+];
+
+const platformOptions = [
+  "Instagram",
+  "Facebook",
+  "LinkedIn",
+  "Google Business",
+];
+
+// Pre-filled sample data
+const sampleDummyData: OnboardingData = {
+  businessName: "Beyond Stories Marketing",
+  industry: "E-Commerce & Retail",
+  website: "https://beyondstories.com",
+  description:
+    "Autonomous AI-powered marketing system helping retail businesses and local stores grow their sales, reach, and brand awareness across platforms.",
+  targetAudience:
+    "Small business owners, local shop owners, boutique brands, and marketing agencies aged 25-50 looking for automated social media growth.",
+  targetLocation: "India, Delhi NCR, Mumbai, Bangalore",
+  goals: ["Increase sales", "Generate leads", "Build brand awareness", "Grow social media"],
+  platforms: ["Instagram", "Facebook", "LinkedIn", "Google Business"],
+  catalogueFile: null,
+};
+
+const emptyData: OnboardingData = {
+  businessName: "",
+  industry: "",
+  website: "",
+  description: "",
+  targetAudience: "",
+  targetLocation: "",
+  goals: [],
+  platforms: [],
+  catalogueFile: null,
+};
+
+export function OnboardingForm() {
+  const [currentStep, setCurrentStep] = useState(1);
+  const [data, setData] = useState<OnboardingData>(sampleDummyData);
+
+  const updateField = <K extends keyof OnboardingData>(
+    field: K,
+    value: OnboardingData[K],
+  ) => {
+    setData((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  };
+
+  const toggleArrayValue = (
+    field: "goals" | "platforms",
+    value: string,
+  ) => {
+    setData((previous) => {
+      const current = previous[field];
+
+      return {
+        ...previous,
+        [field]: current.includes(value)
+          ? current.filter((item) => item !== value)
+          : [...current, value],
+      };
+    });
+  };
+
+  const nextStep = () => {
+    if (currentStep < steps.length) {
+      setCurrentStep((step) => step + 1);
+    }
+  };
+
+  const previousStep = () => {
+    if (currentStep > 1) {
+      setCurrentStep((step) => step - 1);
+    }
+  };
+
+  const completeOnboarding = () => {
+    console.log("Completed Onboarding data:", data);
+    alert(`🎉 Setup Complete!\n\nBusiness: ${data.businessName}\nIndustry: ${data.industry}\nGoals: ${data.goals.join(", ")}\nPlatforms: ${data.platforms.join(", ")}`);
+  };
+
+  return (
+    <div className="w-full max-w-4xl font-sans">
+      
+      {/* Top Header Logo */}
+      <div className="mb-8 flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2.5 font-bold text-zinc-900">
+          <img
+            src="/logo/app logo.png"
+            alt="Logo"
+            className="h-8 w-8 object-contain"
+          />
+          <span className="text-xl tracking-tight">Marketing System</span>
+        </Link>
+
+        {/* Preset controls */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setData(sampleDummyData)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 transition hover:bg-purple-100"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Load Sample Data
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setData(emptyData)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {/* Progress Steps Header */}
+      <div className="mb-10">
+        <div className="flex items-center justify-between">
+          {steps.map((step, index) => {
+            const Icon = step.icon;
+            const completed = currentStep > step.number;
+            const active = currentStep === step.number;
+
+            return (
+              <div key={step.number} className="flex flex-1 items-center">
+                <div className="flex flex-col items-center">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(step.number)}
+                    className={
+                      completed
+                        ? "flex h-11 w-11 items-center justify-center rounded-full border border-purple-600 bg-purple-600 text-white transition hover:scale-105"
+                        : active
+                        ? "flex h-11 w-11 items-center justify-center rounded-full border-2 border-purple-600 bg-purple-600 text-white shadow-md shadow-purple-200 transition hover:scale-105"
+                        : "flex h-11 w-11 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 transition hover:border-zinc-400"
+                    }
+                  >
+                    {completed ? (
+                      <Check className="h-5 w-5 stroke-[2.5]" />
+                    ) : (
+                      <Icon className="h-5 w-5" />
+                    )}
+                  </button>
+
+                  <span
+                    onClick={() => setCurrentStep(step.number)}
+                    className={
+                      active || completed
+                        ? "mt-2 hidden cursor-pointer text-xs font-bold text-zinc-900 sm:block"
+                        : "mt-2 hidden cursor-pointer text-xs font-medium text-zinc-400 sm:block"
+                    }
+                  >
+                    {step.title}
+                  </span>
+                </div>
+
+                {index < steps.length - 1 && (
+                  <div
+                    className={
+                      currentStep > step.number
+                        ? "mx-3 h-0.5 flex-1 bg-purple-600"
+                        : "mx-3 h-0.5 flex-1 bg-zinc-200"
+                    }
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Main Form Card */}
+      <div className="rounded-3xl border border-purple-100/80 bg-white p-6 shadow-xl shadow-purple-500/5 sm:p-10">
+        
+        {/* Step Heading */}
+        <div className="mb-8 border-b border-zinc-100 pb-6">
+          <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-purple-600">
+            Step {currentStep} of {steps.length}
+          </p>
+
+          <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 sm:text-3xl">
+            {steps[currentStep - 1].title}
+          </h1>
+
+          <p className="mt-1.5 text-sm text-zinc-500">
+            {steps[currentStep - 1].description}
+          </p>
+        </div>
+
+        {/* STEP 1 */}
+        {currentStep === 1 && (
+          <div className="space-y-6">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-zinc-900">
+                Business name
+              </label>
+              <input
+                value={data.businessName}
+                onChange={(event) =>
+                  updateField("businessName", event.target.value)
+                }
+                placeholder="e.g. Beyond Stories"
+                className="h-12 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm text-zinc-900 outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-100 placeholder:text-zinc-400"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-zinc-900">
+                Industry
+              </label>
+              <input
+                value={data.industry}
+                onChange={(event) =>
+                  updateField("industry", event.target.value)
+                }
+                placeholder="e.g. Fashion, restaurant, SaaS..."
+                className="h-12 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm text-zinc-900 outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-100 placeholder:text-zinc-400"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-zinc-900">
+                Website
+              </label>
+              <input
+                type="url"
+                value={data.website}
+                onChange={(event) =>
+                  updateField("website", event.target.value)
+                }
+                placeholder="https://example.com"
+                className="h-12 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm text-zinc-900 outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-100 placeholder:text-zinc-400"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-zinc-900">
+                Tell us about your business
+              </label>
+              <textarea
+                value={data.description}
+                onChange={(event) =>
+                  updateField("description", event.target.value)
+                }
+                placeholder="What does your business do? What products or services do you offer?"
+                rows={5}
+                className="w-full resize-none rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-900 outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-100 placeholder:text-zinc-400"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2 */}
+        {currentStep === 2 && (
+          <div className="space-y-6">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-zinc-900">
+                Who is your target audience?
+              </label>
+              <textarea
+                value={data.targetAudience}
+                onChange={(event) =>
+                  updateField("targetAudience", event.target.value)
+                }
+                placeholder="Describe your ideal customer, their interests, age range, profession, needs, etc."
+                rows={6}
+                className="w-full resize-none rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-900 outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-100 placeholder:text-zinc-400"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-zinc-900">
+                Target location
+              </label>
+              <input
+                value={data.targetLocation}
+                onChange={(event) =>
+                  updateField("targetLocation", event.target.value)
+                }
+                placeholder="e.g. India, Delhi NCR, United States..."
+                className="h-12 w-full rounded-xl border border-zinc-200 bg-white px-4 text-sm text-zinc-900 outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-100 placeholder:text-zinc-400"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3 */}
+        {currentStep === 3 && (
+          <div className="space-y-8">
+            <div>
+              <h2 className="mb-3 text-sm font-semibold text-zinc-900">
+                What are your marketing goals?
+              </h2>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {goalOptions.map((goal) => {
+                  const selected = data.goals.includes(goal);
+
+                  return (
+                    <button
+                      type="button"
+                      key={goal}
+                      onClick={() => toggleArrayValue("goals", goal)}
+                      className={
+                        selected
+                          ? "rounded-2xl border-2 border-purple-600 bg-purple-600 p-4 text-left text-sm font-semibold text-white shadow-sm transition"
+                          : "rounded-2xl border border-zinc-200 bg-white p-4 text-left text-sm font-medium text-zinc-800 transition hover:border-purple-300 hover:bg-purple-50/50"
+                      }
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>{goal}</span>
+                        {selected && <Check className="h-4 w-4 stroke-[3]" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <h2 className="mb-3 text-sm font-semibold text-zinc-900">
+                Which platforms do you want to use?
+              </h2>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {platformOptions.map((platform) => {
+                  const selected = data.platforms.includes(platform);
+
+                  return (
+                    <button
+                      type="button"
+                      key={platform}
+                      onClick={() =>
+                        toggleArrayValue("platforms", platform)
+                      }
+                      className={
+                        selected
+                          ? "rounded-2xl border-2 border-purple-600 bg-purple-600 p-4 text-left text-sm font-semibold text-white shadow-sm transition"
+                          : "rounded-2xl border border-zinc-200 bg-white p-4 text-left text-sm font-medium text-zinc-800 transition hover:border-purple-300 hover:bg-purple-50/50"
+                      }
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>{platform}</span>
+                        {selected && <Check className="h-4 w-4 stroke-[3]" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 4 */}
+        {currentStep === 4 && (
+          <div className="space-y-6">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-zinc-900">
+                Brand information
+              </label>
+
+              <textarea
+                value={data.description}
+                onChange={(event) =>
+                  updateField("description", event.target.value)
+                }
+                placeholder="Describe your brand voice, style, positioning, products and anything else the AI should know."
+                rows={6}
+                className="w-full resize-none rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-900 outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-100 placeholder:text-zinc-400"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-zinc-900">
+                Product catalogue
+              </label>
+
+              <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-200 bg-purple-50/40 px-6 py-10 text-center transition hover:border-purple-400 hover:bg-purple-50">
+                <Upload className="mb-3 h-8 w-8 text-purple-600" />
+
+                <span className="text-sm font-bold text-zinc-900">
+                  {data.catalogueFile
+                    ? data.catalogueFile.name
+                    : "Upload your catalogue"}
+                </span>
+
+                <span className="mt-1 text-xs text-zinc-500">
+                  Supports PDF, CSV, XLSX or Images
+                </span>
+
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.csv,.xlsx,.xls,.png,.jpg,.jpeg,.webp"
+                  onChange={(event) =>
+                    updateField(
+                      "catalogueFile",
+                      event.target.files?.[0] ?? null,
+                    )
+                  }
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* Navigation Actions */}
+        <div className="mt-10 flex items-center justify-between border-t border-zinc-100 pt-6">
+          <button
+            type="button"
+            onClick={previousStep}
+            disabled={currentStep === 1}
+            className="inline-flex h-11 items-center gap-2 rounded-xl border border-zinc-200 bg-white px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </button>
+
+          {currentStep < steps.length ? (
+            <button
+              type="button"
+              onClick={nextStep}
+              className="inline-flex h-11 items-center gap-2 rounded-xl bg-purple-600 px-6 text-sm font-semibold text-white transition hover:bg-purple-700 shadow-md shadow-purple-200"
+            >
+              Continue
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={completeOnboarding}
+              className="inline-flex h-11 items-center gap-2 rounded-xl bg-purple-600 px-6 text-sm font-semibold text-white transition hover:bg-purple-700 shadow-md shadow-purple-200"
+            >
+              Complete setup
+              <Check className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+
+============================================================
+FILE: app\onboarding\page.tsx
+============================================================
+import { OnboardingForm } from "@/components/onboarding/onboarding-form";
+
+export default function OnboardingPage() {
+  return (
+    <main className="min-h-screen bg-[#FAF9FF] py-12 text-zinc-900">
+      <div className="mx-auto flex min-h-[calc(100vh-6rem)] max-w-4xl items-center justify-center px-4 sm:px-6 lg:px-8">
+        <OnboardingForm />
+      </div>
+    </main>
+  );
+}
+
+
+============================================================
+FILE: app\signup\page.tsx
+============================================================
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowRight,
+  Sparkles,
+  Loader2,
+} from "lucide-react";
+
+import {
+  registerUser,
+} from "@/lib/api/auth";
+
+import {
+  saveAuthToken,
+} from "@/lib/auth";
+
+export default function SignupPage() {
+  const router = useRouter();
+
+  const [name, setName] =
+    useState("");
+
+  const [businessName, setBusinessName] =
+    useState("");
+
+  const [email, setEmail] =
+    useState("");
+
+  const [password, setPassword] =
+    useState("");
+
+  const [error, setError] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
+
+  async function handleSubmit(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    setError("");
+
+    if (!name.trim()) {
+      setError("Please enter your full name.");
+      return;
+    }
+
+    if (!businessName.trim()) {
+      setError(
+        "Please enter your business name.",
+      );
+      return;
+    }
+
+    if (!email.trim()) {
+      setError("Please enter your email.");
+      return;
+    }
+
+    if (password.length < 8) {
+      setError(
+        "Password must be at least 8 characters.",
+      );
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const response =
+        await registerUser({
+          name: name.trim(),
+          business_name:
+            businessName.trim(),
+          email: email.trim(),
+          password,
+        });
+
+      saveAuthToken(
+        response.access_token,
+        response.token_type,
+      );
+
+      router.push("/onboarding");
+    } catch (err) {
+      if (
+        err instanceof Error
+      ) {
+        setError(err.message);
+      } else {
+        setError(
+          "Unable to create your account.",
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-zinc-50">
+      <div className="grid min-h-screen lg:grid-cols-2">
+        {/* Left side */}
+        <div className="relative hidden overflow-hidden bg-zinc-950 lg:flex lg:flex-col lg:justify-between">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(139,92,246,0.35),transparent_35%)]" />
+
+          <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-violet-600/20 blur-3xl" />
+
+          <div className="relative p-10">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-sm font-semibold text-white"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10">
+                <Sparkles className="h-4 w-4" />
+              </div>
+
+              Marketing System
+            </Link>
+          </div>
+
+          <div className="relative max-w-xl p-10 pb-16">
+            <p className="text-sm font-medium uppercase tracking-[0.2em] text-violet-300">
+              Start growing
+            </p>
+
+            <h1 className="mt-5 text-4xl font-semibold leading-tight text-white">
+              Give your business an autonomous marketing team.
+            </h1>
+
+            <p className="mt-5 max-w-lg text-base leading-7 text-zinc-400">
+              Set up your business once. Your
+              marketing workspace handles
+              strategy, content, publishing,
+              and performance insights.
+            </p>
+
+            <div className="mt-8 space-y-3 text-sm text-zinc-300">
+              <div>
+                ✓ Build campaigns around your
+                business goals
+              </div>
+
+              <div>
+                ✓ Generate on-brand marketing
+                content
+              </div>
+
+              <div>
+                ✓ Connect and manage social
+                platforms
+              </div>
+
+              <div>
+                ✓ Learn continuously from
+                performance
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right side */}
+        <div className="flex items-center justify-center px-6 py-12">
+          <div className="w-full max-w-md">
+            <div className="mb-8 lg:hidden">
+              <Link
+                href="/"
+                className="flex items-center gap-2 text-sm font-semibold"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-950 text-white">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+
+                Marketing System
+              </Link>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm sm:p-9">
+              <div>
+                <h2 className="text-2xl font-semibold tracking-tight">
+                  Create your account
+                </h2>
+
+                <p className="mt-2 text-sm text-zinc-500">
+                  Start building your autonomous
+                  marketing system.
+                </p>
+              </div>
+
+              {error && (
+                <div
+                  role="alert"
+                  className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                >
+                  {error}
+                </div>
+              )}
+
+              <form
+                className="mt-8 space-y-5"
+                onSubmit={handleSubmit}
+              >
+                <div>
+                  <label
+                    htmlFor="name"
+                    className="mb-2 block text-sm font-medium text-zinc-800"
+                  >
+                    Full name
+                  </label>
+
+                  <input
+                    id="name"
+                    name="name"
+                    type="text"
+                    autoComplete="name"
+                    placeholder="Your name"
+                    value={name}
+                    onChange={(event) =>
+                      setName(event.target.value)
+                    }
+                    disabled={loading}
+                    required
+                    className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3.5 text-sm outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-50"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="businessName"
+                    className="mb-2 block text-sm font-medium text-zinc-800"
+                  >
+                    Business name
+                  </label>
+
+                  <input
+                    id="businessName"
+                    name="business_name"
+                    type="text"
+                    autoComplete="organization"
+                    placeholder="Your business"
+                    value={businessName}
+                    onChange={(event) =>
+                      setBusinessName(
+                        event.target.value,
+                      )
+                    }
+                    disabled={loading}
+                    required
+                    className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3.5 text-sm outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-50"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="email"
+                    className="mb-2 block text-sm font-medium text-zinc-800"
+                  >
+                    Email
+                  </label>
+
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@company.com"
+                    value={email}
+                    onChange={(event) =>
+                      setEmail(event.target.value)
+                    }
+                    disabled={loading}
+                    required
+                    className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3.5 text-sm outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-50"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="password"
+                    className="mb-2 block text-sm font-medium text-zinc-800"
+                  >
+                    Password
+                  </label>
+
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Create a password"
+                    value={password}
+                    onChange={(event) =>
+                      setPassword(event.target.value)
+                    }
+                    disabled={loading}
+                    required
+                    minLength={8}
+                    className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3.5 text-sm outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-50"
+                  />
+
+                  <p className="mt-1.5 text-xs text-zinc-400">
+                    Minimum 8 characters.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="group flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-zinc-950 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Creating account...
+                    </>
+                  ) : (
+                    <>
+                      Create account
+                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <div className="relative my-7">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-zinc-200" />
+                </div>
+
+                <div className="relative flex justify-center">
+                  <span className="bg-white px-3 text-xs text-zinc-400">
+                    OR
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={loading}
+                className="flex h-11 w-full items-center justify-center rounded-lg border border-zinc-200 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Continue with Google
+              </button>
+
+              <p className="mt-7 text-center text-sm text-zinc-500">
+                Already have an account?{" "}
+                <Link
+                  href="/login"
+                  className="font-semibold text-zinc-950 hover:underline"
+                >
+                  Sign in
+                </Link>
+              </p>
+            </div>
+
+            <p className="mt-6 text-center text-xs leading-5 text-zinc-400">
+              By creating an account, you agree
+              to our Terms and Privacy Policy.
+            </p>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+
+============================================================
+FILE: app\login\page.tsx
+============================================================
+import Link from "next/link";
+import { ArrowRight, Sparkles } from "lucide-react";
+
+export default function LoginPage() {
+  return (
+    <main className="min-h-screen bg-zinc-50">
+      <div className="grid min-h-screen lg:grid-cols-2">
+        {/* Left side */}
+        <div className="relative hidden overflow-hidden bg-zinc-950 lg:flex lg:flex-col lg:justify-between">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(139,92,246,0.35),transparent_35%)]" />
+          <div className="absolute -bottom-40 -left-20 h-96 w-96 rounded-full bg-violet-600/20 blur-3xl" />
+
+          <div className="relative p-10">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-sm font-semibold text-white"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              Marketing System
+            </Link>
+          </div>
+
+          <div className="relative max-w-xl p-10 pb-16">
+            <p className="text-sm font-medium uppercase tracking-[0.2em] text-violet-300">
+              Autonomous marketing
+            </p>
+
+            <h1 className="mt-5 text-4xl font-semibold leading-tight text-white">
+              Your marketing system is ready when you are.
+            </h1>
+
+            <p className="mt-5 max-w-lg text-base leading-7 text-zinc-400">
+              Create campaigns, publish content, connect your platforms, and
+              learn from your marketing performance from one workspace.
+            </p>
+          </div>
+        </div>
+
+        {/* Right side */}
+        <div className="flex items-center justify-center px-6 py-12">
+          <div className="w-full max-w-md">
+            <div className="mb-8 lg:hidden">
+              <Link
+                href="/"
+                className="flex items-center gap-2 text-sm font-semibold"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-950 text-white">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                Marketing System
+              </Link>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm sm:p-9">
+              <div>
+                <h2 className="text-2xl font-semibold tracking-tight">
+                  Welcome back
+                </h2>
+
+                <p className="mt-2 text-sm text-zinc-500">
+                  Sign in to continue to your marketing workspace.
+                </p>
+              </div>
+
+              <form className="mt-8 space-y-5">
+                <div>
+                  <label
+                    htmlFor="email"
+                    className="mb-2 block text-sm font-medium text-zinc-800"
+                  >
+                    Email
+                  </label>
+
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@company.com"
+                    className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3.5 text-sm outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <label
+                      htmlFor="password"
+                      className="block text-sm font-medium text-zinc-800"
+                    >
+                      Password
+                    </label>
+
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-zinc-500 hover:text-zinc-950"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="Enter your password"
+                    className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3.5 text-sm outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="group flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-zinc-950 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                >
+                  Sign in
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                </button>
+              </form>
+
+              <div className="relative my-7">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-zinc-200" />
+                </div>
+
+                <div className="relative flex justify-center">
+                  <span className="bg-white px-3 text-xs text-zinc-400">
+                    OR
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="flex h-11 w-full items-center justify-center rounded-lg border border-zinc-200 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+              >
+                Continue with Google
+              </button>
+
+              <p className="mt-7 text-center text-sm text-zinc-500">
+                Do not have an account?{" "}
+                <Link
+                  href="/signup"
+                  className="font-semibold text-zinc-950 hover:underline"
+                >
+                  Create one
+                </Link>
+              </p>
+            </div>
+
+            <p className="mt-6 text-center text-xs text-zinc-400">
+              By continuing, you agree to our Terms and Privacy Policy.
+            </p>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
